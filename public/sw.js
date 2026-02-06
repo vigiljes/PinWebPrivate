@@ -1,61 +1,48 @@
-const CACHE_NAME = "clipboard-pwa-v4"; // <-- bump this anytime you change SW
+const CACHE_NAME = "clipboard-pwa-v1";
 const ASSETS = [
-  "/",                 // app shell
+  "/",
   "/index.html",
-  "/manifest.webmanifest",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png"
+  "/manifest.webmanifest"
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil((async () => {
-    const cache = await caches.open(CACHE_NAME);
-    try {
-      // Cache shell files. If one is missing, don’t fail the whole install.
-      await Promise.allSettled(ASSETS.map((p) => cache.add(p)));
-    } catch (e) {
-      // swallow
-    }
-    self.skipWaiting();
-  })());
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+  );
+  self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil((async () => {
-    const keys = await caches.keys();
-    await Promise.all(keys.map((k) => (k === CACHE_NAME ? null : caches.delete(k))));
-    self.clients.claim();
-  })());
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.map((k) => (k === CACHE_NAME ? null : caches.delete(k))))
+    )
+  );
+  self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Never cache non-GET requests (fixes Cache.put errors)
-  if (req.method !== "GET") return;
-
-  // Never cache API calls (clipboard data should always be live)
-  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/.netlify/functions/")) {
-    event.respondWith(fetch(req));
+  // Always hit network for API (don’t cache clipboard)
+  if (url.pathname.startsWith("/.netlify/functions/") || url.pathname.startsWith("/api/")) {
     return;
   }
 
-  // Cache-first for shell; network fallback
-  event.respondWith((async () => {
-    const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(req);
-    if (cached) return cached;
-
-    try {
-      const resp = await fetch(req);
-      if (resp && resp.ok) {
-        cache.put(req, resp.clone());
-      }
-      return resp;
-    } catch {
-      // If offline and no cached match, try index as last resort
-      return (await cache.match("/index.html")) || new Response("Offline", { status: 503 });
-    }
-  })());
+  event.respondWith(
+    caches.match(req).then((cached) => {
+      return (
+        cached ||
+        fetch(req).then((resp) => {
+          // Cache successful GETs for the shell
+          if (req.method === "GET" && resp.ok) {
+            const copy = resp.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+          }
+          return resp;
+        }).catch(() => cached)
+      );
+    })
+  );
 });
