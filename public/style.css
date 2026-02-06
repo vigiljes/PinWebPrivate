@@ -6,20 +6,18 @@
   /* generous bezel above iPhone home bar */
   --lift: 34px;
 
-  /* approximate bar height for textarea bottom padding */
-  --bar-h: 64px;
+  /* JS will set --kb to push the bar up when keyboard is open */
+  --kb: 0px;
 }
 
 html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  overflow-x: hidden;
+  overflow: hidden; /* <-- kills the extra page scrollbar */
 }
 
-/* Dynamic viewport height reduces iOS address-bar jump */
 body{
-  height: 100dvh;
   background: #fff;
   color: #111;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
@@ -35,31 +33,30 @@ body{
 
   padding: var(--pad);
 
-  /* Make sure typing never goes under the fixed bar */
-  padding-bottom: calc(
-    var(--pad) +
-    var(--bar-h) +
-    var(--lift) +
-    env(safe-area-inset-bottom, 0px)
-  );
-
-  height: 100dvh;
+  /* Fill screen WITHOUT causing page scroll */
+  height: 100%;
   overflow: auto;
+
+  /* never hide text under fixed bar (bar height is dynamic-ish, so be generous) */
+  padding-bottom: calc(
+    var(--pad) + 90px + var(--lift) + env(safe-area-inset-bottom, 0px)
+  );
 
   font-size: 16px;
   line-height: 1.35;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
-  /* iOS stability */
   -webkit-text-size-adjust: 100%;
 }
 
-/* Fixed pill bar */
+/* Fixed bottom pill bar */
 .bar{
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
+
+  /* KEYBOARD FOLLOW: lifted by --kb when keyboard opens */
+  bottom: var(--kb);
 
   display: flex;
   align-items: center;
@@ -71,7 +68,8 @@ body{
   border-top: var(--border);
   background: #fff;
 
-  transform: translateZ(0); /* reduce subpixel jitter on iOS */
+  transform: translateZ(0);
+  flex-wrap: wrap;
 }
 
 button{
@@ -81,7 +79,6 @@ button{
   border: 1px solid rgba(0,0,0,.15);
   background: #f7f7f7;
 }
-
 button:active { transform: translateY(1px); }
 button:disabled { opacity: .5; }
 
@@ -91,14 +88,23 @@ button:disabled { opacity: .5; }
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
-  min-width: 220px;
+  min-width: 0;
+  flex: 1 1 180px;
 }
 
 .status, .line{
   font-size: 12px;
   opacity: .78;
   line-height: 1.1;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+@media (max-width: 420px){
+  :root { --pad: 10px; --gap: 8px; }
+  button{ padding: 8px 10px; font-size: 13px; }
+  .status, .line{ font-size: 11px; }
 }
 
 @media (min-width: 900px){

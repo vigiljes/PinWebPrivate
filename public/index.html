@@ -191,7 +191,7 @@
       if (!document.hidden) pull();
       setTimeout(loop, pollMs);
     }
-
+    
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) {
         pollMs = MIN_MS;
@@ -202,6 +202,26 @@
     updateCounter();
     loop();
     setTimeout(() => t.focus(), 200);
+    
+    // Make the bar follow the on-screen keyboard (mobile)
+    // Uses VisualViewport when available (iOS Safari/PWA supports it)
+    (function keyboardFollow() {
+    if (!window.visualViewport) return;
+
+    const root = document.documentElement;
+
+    function update() {
+        // When keyboard opens, visual viewport height shrinks.
+        // The gap between layout viewport and visual viewport is the keyboard area.
+        const kb = Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop);
+        root.style.setProperty("--kb", kb + "px");
+    }
+
+    visualViewport.addEventListener("resize", update);
+    visualViewport.addEventListener("scroll", update);
+    window.addEventListener("orientationchange", update);
+    update();
+    })();
 
     // PWA service worker
     if ("serviceWorker" in navigator) {
