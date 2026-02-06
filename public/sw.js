@@ -1,10 +1,8 @@
-const CACHE_NAME = "clipboard-shell-v3";
+const CACHE_NAME = "clipboard-pwa-v1";
 const ASSETS = [
   "/",
   "/index.html",
-  "/manifest.webmanifest",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png"
+  "/manifest.webmanifest"
 ];
 
 self.addEventListener("install", (event) => {
@@ -23,14 +21,28 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Only handle navigations (page loads). No runtime caching => no chrome-extension errors.
 self.addEventListener("fetch", (event) => {
   const req = event.request;
+  const url = new URL(req.url);
 
-  if (req.method !== "GET") return;
-  if (req.mode !== "navigate") return;
+  // Always hit network for API (don’t cache clipboard)
+  if (url.pathname.startsWith("/.netlify/functions/") || url.pathname.startsWith("/api/")) {
+    return;
+  }
 
   event.respondWith(
-    fetch(req).catch(() => caches.match("/index.html"))
+    caches.match(req).then((cached) => {
+      return (
+        cached ||
+        fetch(req).then((resp) => {
+          // Cache successful GETs for the shell
+          if (req.method === "GET" && resp.ok) {
+            const copy = resp.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+          }
+          return resp;
+        }).catch(() => cached)
+      );
+    })
   );
 });
