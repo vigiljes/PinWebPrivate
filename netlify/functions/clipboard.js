@@ -27,8 +27,8 @@ export async function handler(event) {
       const device = body.device ?? "";
 
       if (typeof text !== "string") text = String(text);
+      if (text.length > 6000) text = text.slice(0, 6000);
 
-      // NO CLAMP: keep full text as provided (platform still has max request size)
       currentText = text;
       updatedAt = Date.now();
       lastDevice = device;
