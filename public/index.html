@@ -3,47 +3,48 @@
 <head>
   <meta charset="utf-8" />
 
-  <!-- important for iPhone safe-area + stable layout -->
+  <!-- iPhone safe-area + stable layout -->
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 
-  <title>Clipboard</title>
+  <title>PinWeb</title>
 
   <!-- PWA -->
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#ffffff" />
 
-  <!-- iOS + general PWA capability -->
+  <!-- PWA capability -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="Clipboard" />
-  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-title" content="PinWeb" />
 
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 
 <body>
-  <textarea id="t" placeholder="Type. Send. Copy."></textarea>
+  <textarea id="t" placeholder="Paste. Pin. Copy."></textarea>
 
   <div class="bar">
-    <button id="send" type="button">Send</button>
+    <button id="send" type="button">Pin</button>
     <button id="copy" type="button">Copy</button>
     <button id="clear" type="button">Clear</button>
 
     <div class="meta">
       <div class="status" id="status">idle</div>
       <div class="line" id="syncedAt">Synced: —</div>
-      <div class="line" id="counter">0 chars · 0.0 KB / 200.0 KB</div>
+      <div class="line" id="counter">0 · 0.0/200.0 KB</div>
     </div>
   </div>
+
   <script>
-    // Your fix (keep this)
+    // Netlify Functions path (your fix)
     const API = "/.netlify/functions/clipboard";
 
-    // Must match clipboard.js
-    const MAX_TEXT_BYTES = 200000; // 200 KB
+    // Keep if you want the display; does NOT enforce unless you wire it to
+    const MAX_TEXT_BYTES = 200000; // 200 KB (display only)
 
-    // polling with backoff (prevents request storms)
+    // polling with backoff
     let pollMs = 1400;
     const MIN_MS = 1000;
     const MAX_MS = 12000;
@@ -87,13 +88,11 @@
     function updateCounter() {
       const text = t.value ?? "";
       const b = bytesOf(text);
-
       counterEl.textContent =
-        `${text.length.toLocaleString()} chars · ${fmtKB(b)} KB / ${fmtKB(MAX_TEXT_BYTES)} KB`;
+        `${text.length.toLocaleString()} · ${fmtKB(b)}/${fmtKB(MAX_TEXT_BYTES)} KB`;
 
-      const tooBig = b > MAX_TEXT_BYTES;
-      sendBtn.disabled = tooBig;
-      if (tooBig) statusEl.textContent = "too big";
+      // informational only; do NOT block unless you want
+      // if (b > MAX_TEXT_BYTES) statusEl.textContent = "big";
     }
 
     t.addEventListener("input", () => {
@@ -115,7 +114,7 @@
           setSyncedNow();
           updateCounter();
         } else {
-          if (statusEl.textContent !== "too big") statusEl.textContent = "up to date";
+          statusEl.textContent = "up to date";
         }
 
         pollMs = Math.max(MIN_MS, Math.floor(pollMs * 0.9));
@@ -125,37 +124,25 @@
       }
     }
 
-    async function send() {
+    async function pin() {
       try {
-        const text = t.value ?? "";
-        const b = bytesOf(text);
-
-        if (b > MAX_TEXT_BYTES) {
-          statusEl.textContent = "too big";
-          return;
-        }
-
         const resp = await fetch(API, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text })
+          body: JSON.stringify({ text: t.value })
         });
 
-        if (resp.status === 413) {
-          statusEl.textContent = "too big";
-          return;
-        }
         if (!resp.ok) {
-          statusEl.textContent = "send failed";
+          statusEl.textContent = "pin failed";
           return;
         }
 
-        statusEl.textContent = "sent";
+        statusEl.textContent = "pinned";
         setSyncedNow();
         pollMs = MIN_MS;
         setTimeout(pull, 250);
       } catch {
-        statusEl.textContent = "send failed";
+        statusEl.textContent = "pin failed";
       }
     }
 
@@ -163,10 +150,12 @@
       try {
         const resp = await fetch(API, { method: "DELETE" });
         if (!resp.ok) throw new Error("HTTP " + resp.status);
+
         t.value = "";
         statusEl.textContent = "cleared";
         setSyncedNow();
         updateCounter();
+
         pollMs = MIN_MS;
         setTimeout(pull, 250);
       } catch {
@@ -183,7 +172,7 @@
       }
     }
 
-    document.getElementById("send").onclick = send;
+    document.getElementById("send").onclick = pin;
     document.getElementById("copy").onclick = copy;
     document.getElementById("clear").onclick = clear;
 
@@ -191,36 +180,31 @@
       if (!document.hidden) pull();
       setTimeout(loop, pollMs);
     }
-    
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) {
-        pollMs = MIN_MS;
-        pull();
-      }
-    });
 
     updateCounter();
     loop();
     setTimeout(() => t.focus(), 200);
-    
-    // Make the bar follow the on-screen keyboard (mobile)
-    // Uses VisualViewport when available (iOS Safari/PWA supports it)
-    (function keyboardFollow() {
-    if (!window.visualViewport) return;
 
-    const root = document.documentElement;
+    // Measure bar height so textarea padding is always correct (PWA stable)
+    (function measureBar() {
+      const root = document.documentElement;
+      const bar = document.querySelector(".bar");
 
-    function update() {
-        // When keyboard opens, visual viewport height shrinks.
-        // The gap between layout viewport and visual viewport is the keyboard area.
-        const kb = Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop);
-        root.style.setProperty("--kb", kb + "px");
-    }
+      function setBarPx() {
+        const h = Math.ceil(bar.getBoundingClientRect().height);
+        root.style.setProperty("--barpx", h + "px");
+      }
 
-    visualViewport.addEventListener("resize", update);
-    visualViewport.addEventListener("scroll", update);
-    window.addEventListener("orientationchange", update);
-    update();
+      window.addEventListener("resize", setBarPx);
+      window.addEventListener("orientationchange", setBarPx);
+      document.addEventListener("visibilitychange", setBarPx);
+
+      if (window.visualViewport) {
+        visualViewport.addEventListener("resize", setBarPx);
+      }
+
+      setBarPx();
+      setTimeout(setBarPx, 250);
     })();
 
     // PWA service worker

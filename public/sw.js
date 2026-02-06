@@ -1,16 +1,15 @@
-const CACHE_NAME = "clipboard-shell-v7";
+const CACHE_NAME = "pinweb-shell-v1";
 const ASSETS = [
   "/",
   "/index.html",
+  "/style.css",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
   "/icons/icon-512.png"
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
-  );
+  event.waitUntil(caches.open(CACHE_NAME).then((c) => c.addAll(ASSETS)));
   self.skipWaiting();
 });
 
@@ -23,13 +22,11 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Only handle page navigations. No runtime caching => no chrome-extension scheme crashes.
+// Only handle navigations (page loads). No runtime caching.
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
   if (req.mode !== "navigate") return;
 
-  event.respondWith(
-    fetch(req).catch(() => caches.match("/index.html"))
-  );
+  event.respondWith(fetch(req).catch(() => caches.match("/index.html")));
 });
