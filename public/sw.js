@@ -1,6 +1,6 @@
-const CACHE_NAME = "clipboard-pwa-v4"; // <-- bump this anytime you change SW
+const CACHE_NAME = "clipboard-pwa-v5"; // bump to force update
 const ASSETS = [
-  "/",                 // app shell
+  "/",
   "/index.html",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
@@ -10,12 +10,7 @@ const ASSETS = [
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
-    try {
-      // Cache shell files. If one is missing, don’t fail the whole install.
-      await Promise.allSettled(ASSETS.map((p) => cache.add(p)));
-    } catch (e) {
-      // swallow
-    }
+    await Promise.allSettled(ASSETS.map((p) => cache.add(p)));
     self.skipWaiting();
   })());
 });
@@ -32,16 +27,24 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Never cache non-GET requests (fixes Cache.put errors)
+  // Only handle GET
   if (req.method !== "GET") return;
 
-  // Never cache API calls (clipboard data should always be live)
+  // Only handle normal web schemes (prevents chrome-extension:// cache.put crash)
+  if (url.protocol !== "http:" && url.protocol !== "https:") return;
+
+  // Never cache API responses
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/.netlify/functions/")) {
     event.respondWith(fetch(req));
     return;
   }
 
-  // Cache-first for shell; network fallback
+  // Optional: only cache same-origin (extra safety)
+  if (url.origin !== self.location.origin) {
+    event.respondWith(fetch(req));
+    return;
+  }
+
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
     const cached = await cache.match(req);
@@ -50,11 +53,10 @@ self.addEventListener("fetch", (event) => {
     try {
       const resp = await fetch(req);
       if (resp && resp.ok) {
-        cache.put(req, resp.clone());
+        await cache.put(req, resp.clone());
       }
       return resp;
     } catch {
-      // If offline and no cached match, try index as last resort
       return (await cache.match("/index.html")) || new Response("Offline", { status: 503 });
     }
   })());
