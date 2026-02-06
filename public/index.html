@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1" />
+  <title>Clipboard</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; }
+    textarea {
+      flex: 1; border: none; outline: none; resize: none;
+      padding: 12px; font-size: 16px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    .bar { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #ddd; }
+    button { padding: 8px 12px; font-size: 14px; }
+    .status { margin-left: auto; opacity: 0.7; font-size: 12px; align-self: center; }
+  </style>
+</head>
+<body>
+  <textarea id="t" placeholder="Type. Send. Copy."></textarea>
+  <div class="bar">
+    <button id="send">Send</button>
+    <button id="copy">Copy</button>
+    <button id="clear">Clear</button>
+    <span class="status" id="status">idle</span>
+  </div>
+
+  <script>
+    const API = "/api/clipboard";
+    const POLL_MS = 700;
+
+    const t = document.getElementById("t");
+    const status = document.getElementById("status");
+
+    let lastSeen = 0;
+    let typing = false;
+
+    t.addEventListener("input", () => {
+      typing = true;
+      setTimeout(() => (typing = false), 400);
+    });
+
+    async function pull() {
+      try {
+        const r = await fetch(API, { cache: "no-store" });
+        const data = await r.json();
+
+        if (data.updatedAt > lastSeen && !typing) {
+          lastSeen = data.updatedAt;
+          t.value = data.text || "";
+        }
+
+        status.textContent = "synced";
+      } catch {
+        status.textContent = "offline";
+      }
+    }
+
+    async function send() {
+      try {
+        await fetch(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: t.value })
+        });
+        status.textContent = "sent";
+        setTimeout(pull, 150);
+      } catch {
+        status.textContent = "send failed";
+      }
+    }
+
+    async function clear() {
+      try {
+        await fetch(API, { method: "DELETE" });
+        t.value = "";
+        status.textContent = "cleared";
+      } catch {
+        status.textContent = "clear failed";
+      }
+    }
+
+    async function copy() {
+      try {
+        await navigator.clipboard.writeText(t.value);
+        status.textContent = "copied";
+      } catch {
+        status.textContent = "copy blocked";
+      }
+    }
+
+    document.getElementById("send").onclick = send;
+    document.getElementById("copy").onclick = copy;
+    document.getElementById("clear").onclick = clear;
+
+    setInterval(pull, POLL_MS);
+    pull();
+    setTimeout(() => t.focus(), 200);
+  </script>
+</body>
+</html>
