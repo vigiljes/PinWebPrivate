@@ -1,5 +1,6 @@
 let currentText = "";
 let updatedAt = 0;
+let lastDevice = "";
 
 function json(status, body) {
   return {
@@ -16,18 +17,22 @@ export async function handler(event) {
   const method = event.httpMethod;
 
   if (method === "GET") {
-    return json(200, { text: currentText, updatedAt });
+    return json(200, { text: currentText, updatedAt, device: lastDevice });
   }
 
   if (method === "POST") {
     try {
       const body = JSON.parse(event.body || "{}");
       let text = body.text ?? "";
-      if (typeof text !== "string") text = String(text);
-      if (text.length > 6000) text = text.slice(0, 6000);
+      const device = body.device ?? "";
 
+      if (typeof text !== "string") text = String(text);
+
+      // NO CLAMP: keep full text as provided (platform still has max request size)
       currentText = text;
       updatedAt = Date.now();
+      lastDevice = device;
+
       return json(200, { ok: true });
     } catch {
       return json(400, { error: "bad json" });
@@ -37,6 +42,7 @@ export async function handler(event) {
   if (method === "DELETE") {
     currentText = "";
     updatedAt = Date.now();
+    lastDevice = "";
     return json(200, { ok: true });
   }
 
