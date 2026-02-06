@@ -202,25 +202,56 @@
     updateCounter();
     loop();
     setTimeout(() => t.focus(), 200);
-    
-    // Make the bar follow the on-screen keyboard (mobile)
-    // Uses VisualViewport when available (iOS Safari/PWA supports it)
-    (function keyboardFollow() {
-    if (!window.visualViewport) return;
 
-    const root = document.documentElement;
+// === KEYBOARD FOLLOW (iOS PWA hardened) ===
+(function keyboardFollow() {
+  const root = document.documentElement;
+  const vv = window.visualViewport;
 
-    function update() {
-        // When keyboard opens, visual viewport height shrinks.
-        // The gap between layout viewport and visual viewport is the keyboard area.
-        const kb = Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop);
-        root.style.setProperty("--kb", kb + "px");
+  // If VisualViewport isn't available, nothing to do.
+  if (!vv) return;
+
+  let raf = 0;
+
+  function setKB(px) {
+    root.style.setProperty("--kb", px + "px");
+  }
+
+  function computeKB() {
+    // Layout viewport - visual viewport = keyboard area (roughly)
+    const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    setKB(kb);
+  }
+
+  function schedule() {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      computeKB();
+    });
+  }
+
+    // IMPORTANT: reset on blur / background so it doesn't get "stuck"
+    function reset() {
+        setKB(0);
+        // small delay helps iOS settle after closing keyboard / app switching
+        setTimeout(schedule, 50);
     }
 
-    visualViewport.addEventListener("resize", update);
-    visualViewport.addEventListener("scroll", update);
-    window.addEventListener("orientationchange", update);
-    update();
+    vv.addEventListener("resize", schedule);
+    window.addEventListener("orientationchange", reset);
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) reset();
+        else schedule();
+    });
+
+    // When user taps back into textarea after closing keyboard once
+    const ta = document.getElementById("t");
+    ta.addEventListener("focus", schedule);
+    ta.addEventListener("blur", reset);
+
+    // Initial
+    schedule();
     })();
 
     // PWA service worker
