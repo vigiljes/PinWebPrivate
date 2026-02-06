@@ -1,98 +1,257 @@
 <!doctype html>
 <html>
 <head>
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#ffffff" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Clipboard" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1" />
   <title>Clipboard</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#ffffff" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Clipboard" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
   <style>
-    html, body { height: 100%; margin: 0; }
-    body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; }
-    textarea {
-      flex: 1; border: none; outline: none; resize: none;
-      padding: 12px; font-size: 16px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    :root{
+      --pad: 12px;
+      --gap: 10px;
+      --border: 1px solid rgba(0,0,0,.12);
+
+      /* generous bezel above iPhone home bar */
+      --lift: 34px;
     }
-    .bar { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #ddd; }
-    button { padding: 8px 12px; font-size: 14px; }
-    .status { margin-left: auto; opacity: 0.7; font-size: 12px; align-self: center; }
+
+    html, body { height: 100%; margin: 0; }
+
+    body{
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: #fff;
+      color: #111;
+    }
+
+    textarea{
+      flex: 1;
+      width: 100%;
+      box-sizing: border-box;
+      border: none;
+      outline: none;
+      resize: none;
+      padding: var(--pad);
+      font-size: 16px;
+      line-height: 1.35;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    .bar{
+      display: flex;
+      align-items: center;
+      gap: var(--gap);
+      padding: 10px var(--pad);
+      padding-bottom: calc(10px + var(--lift) + env(safe-area-inset-bottom, 0px));
+      border-top: var(--border);
+      background: #fff;
+    }
+
+    button{
+      padding: 9px 12px;
+      font-size: 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(0,0,0,.15);
+      background: #f7f7f7;
+    }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: .5; }
+
+    .meta{
+      margin-left: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 2px;
+      min-width: 220px;
+    }
+
+    .status, .line{
+      font-size: 12px;
+      opacity: .78;
+      line-height: 1.1;
+      white-space: nowrap;
+    }
+
+    @media (min-width: 900px){
+      textarea { font-size: 15px; }
+      .bar{
+        padding-top: 8px;
+        padding-bottom: calc(8px + var(--lift) + env(safe-area-inset-bottom, 0px));
+      }
+      button { padding: 8px 11px; }
+    }
   </style>
 </head>
+
 <body>
   <textarea id="t" placeholder="Type. Send. Copy."></textarea>
-  <div class="bar">
-    <button id="send">Send</button>
-    <button id="copy">Copy</button>
-    <button id="clear">Clear</button>
-    <span class="status" id="status">idle</span>
-  </div>
 
+  <div class="bar">
+    <button id="send" type="button">Send</button>
+    <button id="copy" type="button">Copy</button>
+    <button id="clear" type="button">Clear</button>
+
+    <div class="meta">
+      <div class="status" id="status">idle</div>
+      <div class="line" id="syncedAt">Synced: —</div>
+      <div class="line" id="counter">0 chars · 0.0 KB / 200.0 KB</div>
+    </div>
+  </div>
   <script>
-    const API = "/.netlify/functions/clipboard";
-    const POLL_MS = 700;
+    const API = "/api/clipboard";
+
+    // Must match clipboard.js
+    const MAX_TEXT_BYTES = 200000; // 200 KB
+
+    // polling with backoff to avoid request storms
+    let pollMs = 1400;
+    const MIN_MS = 1000;
+    const MAX_MS = 12000;
 
     const t = document.getElementById("t");
-    const status = document.getElementById("status");
+    const sendBtn = document.getElementById("send");
+    const statusEl = document.getElementById("status");
+    const syncedEl = document.getElementById("syncedAt");
+    const counterEl = document.getElementById("counter");
 
     let lastSeen = 0;
     let typing = false;
 
+    function bytesOf(str) {
+      return new TextEncoder().encode(str).length;
+    }
+
+    function fmtKB(bytes) {
+      return (bytes / 1024).toFixed(1);
+    }
+
+    function formatSyncedTime(date) {
+      const parts = new Intl.DateTimeFormat(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+        timeZoneName: "short"
+      }).formatToParts(date);
+
+      const hour = parts.find(p => p.type === "hour")?.value ?? "";
+      const minute = parts.find(p => p.type === "minute")?.value ?? "";
+      const dayPeriod = parts.find(p => p.type === "dayPeriod")?.value ?? "";
+      const tz = parts.find(p => p.type === "timeZoneName")?.value ?? "";
+
+      return `Synced at ${hour}:${minute} ${dayPeriod} (${tz})`;
+    }
+
+    function setSyncedNow() {
+      syncedEl.textContent = formatSyncedTime(new Date());
+    }
+
+    function updateCounter() {
+      const text = t.value ?? "";
+      const b = bytesOf(text);
+
+      counterEl.textContent = `${text.length.toLocaleString()} chars · ${fmtKB(b)} KB / ${fmtKB(MAX_TEXT_BYTES)} KB`;
+
+      const tooBig = b > MAX_TEXT_BYTES;
+      sendBtn.disabled = tooBig;
+
+      if (tooBig) statusEl.textContent = "too big";
+    }
+
     t.addEventListener("input", () => {
       typing = true;
-      setTimeout(() => (typing = false), 400);
+      setTimeout(() => (typing = false), 450);
+      updateCounter();
     });
 
     async function pull() {
       try {
         const r = await fetch(API, { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
         const data = await r.json();
 
-        if (data.updatedAt > lastSeen && !typing) {
+        if (data.updatedAt > lastSeen) {
           lastSeen = data.updatedAt;
-          t.value = data.text || "";
+          if (!typing) t.value = data.text || "";
+          statusEl.textContent = "synced";
+          setSyncedNow();
+          updateCounter();
+        } else {
+          if (statusEl.textContent !== "too big") statusEl.textContent = "up to date";
         }
 
-        status.textContent = "synced";
+        pollMs = Math.max(MIN_MS, Math.floor(pollMs * 0.9));
       } catch {
-        status.textContent = "offline";
+        statusEl.textContent = "offline / rate-limited";
+        pollMs = Math.min(MAX_MS, Math.floor(pollMs * 1.6));
       }
     }
 
     async function send() {
       try {
-        await fetch(API, {
+        const text = t.value ?? "";
+        const b = bytesOf(text);
+
+        if (b > MAX_TEXT_BYTES) {
+          statusEl.textContent = "too big";
+          return;
+        }
+
+        const resp = await fetch(API, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: t.value })
+          body: JSON.stringify({ text })
         });
-        status.textContent = "sent";
-        setTimeout(pull, 150);
+
+        if (resp.status === 413) {
+          statusEl.textContent = "too big";
+          return;
+        }
+        if (!resp.ok) {
+          statusEl.textContent = "send failed";
+          return;
+        }
+
+        statusEl.textContent = "sent";
+        setSyncedNow();
+        pollMs = MIN_MS;
+        setTimeout(pull, 250);
       } catch {
-        status.textContent = "send failed";
+        statusEl.textContent = "send failed";
       }
     }
 
     async function clear() {
       try {
-        await fetch(API, { method: "DELETE" });
+        const resp = await fetch(API, { method: "DELETE" });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
         t.value = "";
-        status.textContent = "cleared";
+        statusEl.textContent = "cleared";
+        setSyncedNow();
+        updateCounter();
+        pollMs = MIN_MS;
+        setTimeout(pull, 250);
       } catch {
-        status.textContent = "clear failed";
+        statusEl.textContent = "clear failed";
       }
     }
 
     async function copy() {
       try {
         await navigator.clipboard.writeText(t.value);
-        status.textContent = "copied";
+        statusEl.textContent = "copied";
       } catch {
-        status.textContent = "copy blocked";
+        statusEl.textContent = "copy blocked";
       }
     }
 
@@ -100,16 +259,28 @@
     document.getElementById("copy").onclick = copy;
     document.getElementById("clear").onclick = clear;
 
-    setInterval(pull, POLL_MS);
-    pull();
-    setTimeout(() => t.focus(), 200);
-  </script>
-  <script>
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    function loop() {
+      if (!document.hidden) pull();
+      setTimeout(loop, pollMs);
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        pollMs = MIN_MS;
+        pull();
+      }
     });
-  }
-</script>
+
+    updateCounter();
+    loop();
+    setTimeout(() => t.focus(), 200);
+
+    // PWA service worker
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
+      });
+    }
+  </script>
 </body>
 </html>
